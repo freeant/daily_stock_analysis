@@ -97,6 +97,50 @@ class SniperPoints(BaseModel):
     take_profit: Optional[Union[str, int, float]] = None
 
 
+class BuyZoneStruct(BaseModel):
+    """Structured buy zone for sniper_points_struct."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    low: float
+    high: float
+    basis: Optional[str] = None
+    condition: Optional[str] = None
+
+
+class StopLossStruct(BaseModel):
+    """Structured stop-loss for sniper_points_struct."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    price: float
+    trigger: str
+    basis: Optional[str] = None
+
+
+class TakeProfitStruct(BaseModel):
+    """Structured take-profit for sniper_points_struct."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    targets: List[float]
+    basis: Optional[str] = None
+
+
+class SniperPointsStruct(BaseModel):
+    """Machine-readable mirror of sniper_points text (schema_version=1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int
+    applicable: bool
+    not_applicable_reason: Optional[str] = None
+    ideal_buy: Optional[BuyZoneStruct] = None
+    secondary_buy: Optional[BuyZoneStruct] = None
+    stop_loss: Optional[StopLossStruct] = None
+    take_profit: Optional[TakeProfitStruct] = None
+
+
 class PositionStrategy(BaseModel):
     """Position strategy."""
 
@@ -109,6 +153,7 @@ class BattlePlan(BaseModel):
     """Battle plan block."""
 
     sniper_points: Optional[SniperPoints] = None
+    sniper_points_struct: Optional[SniperPointsStruct] = None
     position_strategy: Optional[PositionStrategy] = None
     action_checklist: Optional[List[str]] = None
 

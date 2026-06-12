@@ -17,6 +17,10 @@ from typing import List, Optional
 from src.agent.agents.base_agent import BaseAgent
 from src.agent.protocols import AgentContext, AgentOpinion, normalize_decision_signal
 from src.report_language import normalize_report_language
+from src.schemas.sniper_points_struct import (
+    SNIPER_POINTS_STRUCT_PROMPT_SECTION,
+    finalize_dashboard_sniper_points_struct,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +121,10 @@ non-trading, or unknown phases, do not invent today's intraday movement. If
 quote, daily bars, or technical data is stale, fallback, missing, fetch_failed,
 partial, or estimated, ``confidence_level`` must not be High/高 and the
 limitation must be reflected in ``confidence_reason`` or ``data_limitations``.
-"""
+
+The nested ``dashboard.battle_plan`` must include both ``sniper_points`` (text)
+and ``sniper_points_struct`` (numeric mirror, schema_version=1).
+""" + SNIPER_POINTS_STRUCT_PROMPT_SECTION
         if report_language == "en":
             return prompt + """
 
@@ -211,6 +218,11 @@ limitation must be reflected in ``confidence_reason`` or ``data_limitations``.
         if dashboard:
             dashboard["decision_type"] = normalize_decision_signal(
                 dashboard.get("decision_type", "hold")
+            )
+            nested = dashboard.get("dashboard")
+            finalize_dashboard_sniper_points_struct(
+                nested if isinstance(nested, dict) else dashboard,
+                strip_on_failure=True,
             )
             ctx.set_data("final_dashboard", dashboard)
             try:

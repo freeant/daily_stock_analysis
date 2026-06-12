@@ -46,6 +46,7 @@ from src.agent.tools.registry import ToolRegistry
 from src.agent.chat_context import build_visible_chat_history
 from src.config import AGENT_MAX_STEPS_DEFAULT, get_config
 from src.report_language import normalize_report_language
+from src.schemas.sniper_points_struct import finalize_dashboard_sniper_points_struct
 
 if TYPE_CHECKING:
     from src.agent.executor import AgentResult
@@ -1030,6 +1031,7 @@ class AgentOrchestrator:
         payload["key_points"] = key_points
         payload["risk_warning"] = risk_warning
         payload["dashboard"] = dashboard_block
+        finalize_dashboard_sniper_points_struct(dashboard_block, strip_on_failure=True)
         return payload
 
     def _collect_key_levels(

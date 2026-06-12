@@ -56,6 +56,13 @@ from src.report_language import (
 )
 from src.schemas.decision_action import build_action_fields
 from src.schemas.report_schema import AnalysisReportSchema
+from src.schemas.sniper_points_struct import (
+    SNIPER_POINTS_STRUCT_JSON_SNIPPET,
+    SNIPER_POINTS_STRUCT_PROMPT_SECTION,
+    build_sniper_struct_retry_prompt,
+    finalize_dashboard_sniper_points_struct,
+    validate_dashboard_sniper_points_struct,
+)
 from src.market_context import get_market_role, get_market_guidelines
 from src.market_phase_prompt import format_market_phase_prompt_section
 
@@ -1775,6 +1782,7 @@ class GeminiAnalyzer:
                 "stop_loss": "止损位：XX元（跌破MA20或X%）",
                 "take_profit": "目标位：XX元（前高/整数关口）"
             },
+""" + SNIPER_POINTS_STRUCT_JSON_SNIPPET + """
             "position_strategy": {
                 "suggested_position": "建议仓位：X成",
                 "entry_plan": "分批建仓策略描述",
@@ -1867,7 +1875,7 @@ class GeminiAnalyzer:
 - 只有在接近支撑确认或有效突破压力，且资金流/量价配合时，才能给出买入；接近压力且资金流出时不得追买。
 - 只有在跌破关键支撑、主力资金持续流出或风险显著放大时，才能给出卖出/减仓。
 - 必须输出 `dashboard.phase_decision` 七字段；盘中/午休/临近收盘要给出当前动作、观察条件和下一次检查点。
-- 盘前、非交易日或未知阶段不得伪造今日盘中走势；quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated 时，`confidence_level` 不得为高。"""
+- 盘前、非交易日或未知阶段不得伪造今日盘中走势；quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated 时，`confidence_level` 不得为高。""" + SNIPER_POINTS_STRUCT_PROMPT_SECTION
 
     SYSTEM_PROMPT = """你是一位{market_placeholder}投资分析师，负责生成专业的【决策仪表盘】分析报告。
 
@@ -1945,6 +1953,7 @@ class GeminiAnalyzer:
                 "stop_loss": "止损位：XX元（失效条件或X%风险）",
                 "take_profit": "目标位：XX元（按阻力位/风险回报比制定）"
             },
+""" + SNIPER_POINTS_STRUCT_JSON_SNIPPET + """
             "position_strategy": {
                 "suggested_position": "建议仓位：X成",
                 "entry_plan": "分批建仓策略描述",
@@ -2034,7 +2043,7 @@ class GeminiAnalyzer:
 - 只有在接近支撑确认或有效突破压力，且资金流/量价配合时，才能给出买入；接近压力且资金流出时不得追买。
 - 只有在跌破关键支撑、主力资金持续流出或风险显著放大时，才能给出卖出/减仓。
 - 必须输出 `dashboard.phase_decision` 七字段；盘中/午休/临近收盘要给出当前动作、观察条件和下一次检查点。
-- 盘前、非交易日或未知阶段不得伪造今日盘中走势；quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated 时，`confidence_level` 不得为高。"""
+- 盘前、非交易日或未知阶段不得伪造今日盘中走势；quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated 时，`confidence_level` 不得为高。""" + SNIPER_POINTS_STRUCT_PROMPT_SECTION
 
     TEXT_SYSTEM_PROMPT = """你是一位专业的股票分析助手。
 
@@ -2796,6 +2805,7 @@ class GeminiAnalyzer:
             current_prompt = prompt
             retry_count = 0
             max_retries = config.report_integrity_retry if config.report_integrity_enabled else 0
+            sniper_struct_retry_count = 0
 
             while True:
                 start_time = time.time()
@@ -2845,40 +2855,70 @@ class GeminiAnalyzer:
                 normalize_chip_structure_availability(result, context.get("chip"))
 
                 # 内容完整性校验（可选）
-                if not config.report_integrity_enabled:
-                    break
-                require_phase_decision = isinstance(context.get("market_phase_context"), dict)
-                pass_integrity, missing_fields = self._check_content_integrity(
-                    result,
-                    require_phase_decision=require_phase_decision,
-                )
-                if pass_integrity:
-                    break
-                if retry_count < max_retries:
-                    current_prompt = self._build_integrity_retry_prompt(
-                        prompt,
-                        response_text,
-                        missing_fields,
-                        report_language=report_language,
-                    )
-                    retry_count += 1
-                    logger.info(
-                        "[LLM完整性] 必填字段缺失 %s，第 %d 次补全重试",
-                        missing_fields,
-                        retry_count,
-                    )
-                    retry_progress = min(99, 92 + retry_count * 2)
-                    _emit_progress(
-                        retry_progress,
-                        f"{name}：报告字段不完整，正在补全重试（{retry_count}/{max_retries}）",
+                if config.report_integrity_enabled:
+                    require_phase_decision = isinstance(context.get("market_phase_context"), dict)
+                    pass_integrity, missing_fields = self._check_content_integrity(
+                        result,
+                        require_phase_decision=require_phase_decision,
                     )
                 else:
+                    pass_integrity = True
+                    missing_fields = []
+                if not pass_integrity:
+                    if retry_count < max_retries:
+                        current_prompt = self._build_integrity_retry_prompt(
+                            prompt,
+                            response_text,
+                            missing_fields,
+                            report_language=report_language,
+                        )
+                        retry_count += 1
+                        logger.info(
+                            "[LLM完整性] 必填字段缺失 %s，第 %d 次补全重试",
+                            missing_fields,
+                            retry_count,
+                        )
+                        retry_progress = min(99, 92 + retry_count * 2)
+                        _emit_progress(
+                            retry_progress,
+                            f"{name}：报告字段不完整，正在补全重试（{retry_count}/{max_retries}）",
+                        )
+                        continue
                     self._apply_placeholder_fill(result, missing_fields)
                     logger.warning(
                         "[LLM完整性] 必填字段缺失 %s，已占位补全，不阻塞流程",
                         missing_fields,
                     )
+
+                struct_ok, struct_errors = validate_dashboard_sniper_points_struct(
+                    result.dashboard,
+                )
+                if struct_ok:
                     break
+                if sniper_struct_retry_count < 1:
+                    current_prompt = build_sniper_struct_retry_prompt(
+                        prompt,
+                        response_text,
+                        struct_errors,
+                        report_language=report_language,
+                    )
+                    sniper_struct_retry_count += 1
+                    logger.info(
+                        "[sniper_points_struct] 校验失败 %s，第 %d 次修正重试",
+                        struct_errors,
+                        sniper_struct_retry_count,
+                    )
+                    _emit_progress(
+                        min(99, 94 + sniper_struct_retry_count),
+                        f"{name}：结构化狙击点位校验失败，正在修正重试",
+                    )
+                    continue
+
+                finalize_dashboard_sniper_points_struct(
+                    result.dashboard,
+                    strip_on_failure=True,
+                )
+                break
 
             persist_llm_usage(llm_usage, model_used, call_type="analysis", stock_code=code)
 

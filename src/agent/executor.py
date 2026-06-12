@@ -31,6 +31,11 @@ from src.agent.tools.registry import ToolRegistry
 from src.report_language import normalize_report_language
 from src.market_context import get_market_role, get_market_guidelines
 from src.market_phase_prompt import format_market_phase_prompt_section
+from src.schemas.sniper_points_struct import (
+    SNIPER_POINTS_STRUCT_JSON_SNIPPET,
+    SNIPER_POINTS_STRUCT_PROMPT_SECTION,
+    finalize_dashboard_sniper_points_struct,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +133,7 @@ LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = """你是一位专注于趋势交易的{mar
         }},
         "battle_plan": {{
             "sniper_points": {{"ideal_buy": "", "secondary_buy": "", "stop_loss": "", "take_profit": ""}},
+""" + SNIPER_POINTS_STRUCT_JSON_SNIPPET + """
             "position_strategy": {{"suggested_position": "", "entry_plan": "", "risk_control": ""}},
             "action_checklist": []
         }},
@@ -204,6 +210,7 @@ LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = """你是一位专注于趋势交易的{mar
 - 只有在跌破关键支撑、主力资金持续流出或风险显著放大时，才能给出卖出/减仓。
 - 必须输出 `dashboard.phase_decision` 七字段；盘中/午休/临近收盘要给出当前动作、观察条件和下一次检查点。
 - 盘前、非交易日或未知阶段不得伪造今日盘中走势；quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated 时，`confidence_level` 不得为高。
+""" + SNIPER_POINTS_STRUCT_PROMPT_SECTION + """
 
 {language_section}
 """
@@ -278,6 +285,7 @@ AGENT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数
         }},
         "battle_plan": {{
             "sniper_points": {{"ideal_buy": "", "secondary_buy": "", "stop_loss": "", "take_profit": ""}},
+""" + SNIPER_POINTS_STRUCT_JSON_SNIPPET + """
             "position_strategy": {{"suggested_position": "", "entry_plan": "", "risk_control": ""}},
             "action_checklist": []
         }},
@@ -351,6 +359,7 @@ AGENT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数
 - 只有在跌破关键支撑、主力资金持续流出或风险显著放大时，才能给出卖出/减仓。
 - 必须输出 `dashboard.phase_decision` 七字段；盘中/午休/临近收盘要给出当前动作、观察条件和下一次检查点。
 - 盘前、非交易日或未知阶段不得伪造今日盘中走势；quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated 时，`confidence_level` 不得为高。
+""" + SNIPER_POINTS_STRUCT_PROMPT_SECTION + """
 
 {language_section}
 """
@@ -756,6 +765,12 @@ class AgentExecutor:
 
         if parse_dashboard and loop_result.success:
             dashboard = parse_dashboard_json(loop_result.content)
+            if isinstance(dashboard, dict):
+                nested = dashboard.get("dashboard")
+                finalize_dashboard_sniper_points_struct(
+                    nested if isinstance(nested, dict) else dashboard,
+                    strip_on_failure=True,
+                )
             return AgentResult(
                 success=dashboard is not None,
                 content=loop_result.content,
